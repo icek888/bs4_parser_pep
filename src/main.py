@@ -3,46 +3,45 @@ import re
 from urllib.parse import urljoin
 
 import requests_cache
-from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ChunkedEncodingError, RequestException
 from tqdm import tqdm
 from urllib3.util.retry import Retry
 
 from configs import configure_argument_parser, configure_logging
-from constants import BASE_DIR, MAIN_DOC_URL, PEP_INDEX_URL
+from constants import MAIN_DOC_URL, PEP_INDEX_URL, DOWNLOADS_DIR, BASE_DIR
 from exceptions import ParserFindTagException
 from outputs import control_output
 from utils import (
     find_tag,
-    get_response,
     extract_rows_from_tables,
     extract_status_from_pep_page,
-    parse_row
-    )
+    parse_row,
+    fetch_and_parse
+)
 
 
 def whats_new(session):
+    """Парсинг раздела What's New."""
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
-    response = get_response(session, whats_new_url)
-    if response is None:
+    soup = fetch_and_parse(session, whats_new_url)
+    if soup is None:
         return
-    soup = BeautifulSoup(response.text, 'lxml')
+
     main_div = find_tag(soup, 'section', attrs={'id': 'what-s-new-in-python'})
     div_with_ul = find_tag(main_div, 'div', attrs={'class': 'toctree-wrapper'})
-    sections_by_python = div_with_ul.find_all(
-        'li', attrs={'class': 'toctree-l1'}
-        )
+    sections_by_python = div_with_ul.find_all('li',
+                                              attrs={'class': 'toctree-l1'})
     results = [('Ссылка на статью', 'Заголовок', 'Редактор, автор')]
 
-    for section in tqdm(sections_by_python):
+    for section in tqdm(sections_by_python, desc='Парсинг нововведений'):
         version_a_tag = find_tag(section, 'a')
         href = version_a_tag['href']
         version_link = urljoin(whats_new_url, href)
-        response = get_response(session, version_link)
-        if response is None:
+        soup = fetch_and_parse(session, version_link)
+        if soup is None:
+            logging.warning(f'Пропущена итерация для ссылки: {version_link}')
             continue
-        soup = BeautifulSoup(response.text, 'lxml')
         h1 = find_tag(soup, 'h1')
         dl = find_tag(soup, 'dl')
         results.append((version_link, h1.text.strip(), dl.text.strip()))
@@ -51,10 +50,10 @@ def whats_new(session):
 
 def latest_versions(session):
     """Парсинг версий Python и их статусов с главной страницы документации."""
-    response = get_response(session, MAIN_DOC_URL)
-    if response is None:
+    soup = fetch_and_parse(session, MAIN_DOC_URL)
+    if soup is None:
         return
-    soup = BeautifulSoup(response.text, 'lxml')
+
     sidebar = find_tag(soup, 'div', attrs={'class': 'sphinxsidebarwrapper'})
     ul_tags = sidebar.find_all('ul')
 
@@ -84,11 +83,12 @@ def latest_versions(session):
 
 
 def download(session):
+    """Загрузка PDF документации."""
     downloads_url = urljoin(MAIN_DOC_URL, 'download.html')
-    response = get_response(session, downloads_url)
-    if response is None:
+    soup = fetch_and_parse(session, downloads_url)
+    if soup is None:
         return
-    soup = BeautifulSoup(response.text, 'lxml')
+
     main_tag = find_tag(soup, 'div', attrs={'role': 'main'})
     table_tag = find_tag(main_tag, 'table', attrs={'class': 'docutils'})
     pdf_a4_tag = find_tag(
@@ -97,7 +97,7 @@ def download(session):
     pdf_a4_link = pdf_a4_tag['href']
     archive_url = urljoin(downloads_url, pdf_a4_link)
     filename = archive_url.split('/')[-1]
-    downloads_dir = BASE_DIR / 'downloads'
+    downloads_dir = BASE_DIR / DOWNLOADS_DIR
     downloads_dir.mkdir(exist_ok=True)
     archive_path = downloads_dir / filename
 
@@ -115,9 +115,8 @@ def download(session):
 
         total_size_in_bytes = int(response.headers.get('content-length', 0))
         block_size = 1024
-        progress_bar = tqdm(
-            total=total_size_in_bytes, unit='iB', unit_scale=True
-            )
+        progress_bar = tqdm(total=total_size_in_bytes, unit='iB',
+                            unit_scale=True)
 
         with open(archive_path, 'wb') as file:
             for data in response.iter_content(block_size):
@@ -140,18 +139,18 @@ def download(session):
 
 
 def pep(session):
-    response = get_response(session, PEP_INDEX_URL)
-    if response is None:
-        logging.error('Не удалось получить страницу PEP Index.')
+    """Парсинг всех таблиц PEP и подсчет статусов."""
+    soup = fetch_and_parse(session, PEP_INDEX_URL)
+    if soup is None:
         return
 
-    soup = BeautifulSoup(response.text, 'lxml')
     rows = extract_rows_from_tables(soup)
     if not rows:
         return
 
     results = {}
     total_peps = 0
+    warnings = []
 
     for row in tqdm(rows, desc='Обработка строк таблиц'):
         table_status, pep_link = parse_row(row, table_index=0)
@@ -161,8 +160,8 @@ def pep(session):
         page_status = extract_status_from_pep_page(session, pep_link)
 
         if page_status not in table_status:
-            logging.warning(
-                f'Несовпадающие статусы:\n'
+            warnings.append(
+                'Несовпадающие статусы:\n'
                 f'{pep_link}\n'
                 f'Статус в карточке: {page_status}\n'
                 f'Ожидаемые статусы: {table_status}'
@@ -173,6 +172,10 @@ def pep(session):
 
     results['Total'] = total_peps
     logging.info(f'Результаты парсинга PEP: {results}')
+
+    for warning in warnings:
+        logging.warning(warning)
+
     return [('Статус', 'Количество')] + list(results.items())
 
 
@@ -185,24 +188,31 @@ MODE_TO_FUNCTION = {
 
 
 def main():
-    configure_logging()
-    logging.info('Парсер запущен!')
-    arg_parser = configure_argument_parser(MODE_TO_FUNCTION.keys())
-    args = arg_parser.parse_args()
+    """Главная функция запуска парсера."""
+    try:
+        configure_logging()
+        logging.info('Парсер запущен!')
 
-    logging.info(f'Аргументы командной строки: {args}')
+        arg_parser = configure_argument_parser(MODE_TO_FUNCTION.keys())
+        args = arg_parser.parse_args()
 
-    session = requests_cache.CachedSession()
-    if args.clear_cache:
-        session.cache.clear()
-        logging.info('Кеш очищен.')
+        logging.info(f'Аргументы командной строки: {args}')
 
-    parser_mode = args.mode
-    results = MODE_TO_FUNCTION[parser_mode](session)
-    if results is not None:
-        control_output(results, args)
+        session = requests_cache.CachedSession()
+        if args.clear_cache:
+            session.cache.clear()
+            logging.info('Кеш очищен.')
 
-    logging.info('Парсер завершил работу.')
+        parser_mode = args.mode
+        results = MODE_TO_FUNCTION[parser_mode](session)
+        if results is not None:
+            control_output(results, args)
+
+        logging.info('Парсер завершил работу.')
+    except Exception as e:
+        logging.exception(
+            f'Критическая ошибка во время выполнения программы: {e}'
+            )
 
 
 if __name__ == '__main__':

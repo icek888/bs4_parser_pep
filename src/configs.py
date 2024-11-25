@@ -1,6 +1,7 @@
 import argparse
 import logging
-from constants import BASE_DIR
+
+from constants import LOG_DIR, LOG_FILE, AVAILABLE_OUTPUT_CHOICES
 
 
 def configure_argument_parser(available_modes):
@@ -11,31 +12,25 @@ def configure_argument_parser(available_modes):
         help='Режимы работы парсера'
     )
     parser.add_argument(
-        '-c',
-        '--clear-cache',
+        '-c', '--clear-cache',
         action='store_true',
         help='Очистка кеша'
     )
     parser.add_argument(
-        '-o',
-        '--output',
-        choices=('pretty', 'file'),
+        '-o', '--output',
+        choices=AVAILABLE_OUTPUT_CHOICES,
         help='Дополнительные способы вывода данных'
     )
     return parser
 
 
-def configure_logging():
-    log_dir = BASE_DIR / 'logs'
-    log_dir.mkdir(exist_ok=True)
-
-    log_file = log_dir / 'parser.log'
-
+def configure_logging() -> None:
+    LOG_DIR.mkdir(exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.FileHandler(LOG_FILE, encoding='utf-8'),
             logging.StreamHandler()
         ]
     )

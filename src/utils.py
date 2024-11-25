@@ -1,38 +1,53 @@
 import logging
-from bs4 import BeautifulSoup
-from requests import RequestException
 from urllib.parse import urljoin
 
-from exceptions import ParserFindTagException
+from bs4 import BeautifulSoup
+from requests import RequestException
+
 from constants import EXPECTED_STATUS, PEP_INDEX_URL
+from exceptions import ParserFindTagException
 
 
-def get_response(session, url):
-    """Обрабатывает запросы и перехватывает сетевые ошибки."""
+def get_response(session, url, encoding='utf-8'):
+    """
+    Обрабатывает запросы и перехватывает сетевые ошибки.
+    """
     try:
         response = session.get(url)
-        response.encoding = 'utf-8'
+        response.encoding = encoding
         return response
-    except RequestException:
-        logging.exception(
-            f'Возникла ошибка при загрузке страницы {url}',
-            stack_info=True
-        )
+    except RequestException as e:
+        raise RuntimeError(f'Ошибка при загрузке страницы {url}: {e}') from e
 
 
 def find_tag(soup, tag, attrs=None, string=None):
-    """Ищет тег в переданном объекте BeautifulSoup.
-    Вызывает исключение, если тег не найден."""
+    """
+    Ищет тег в переданном объекте BeautifulSoup.
+    Вызывает исключение, если тег не найден.
+    """
     searched_tag = soup.find(tag, attrs=(attrs or {}), string=string)
     if searched_tag is None:
         error_msg = f'Не найден тег {tag} {attrs}'
-        logging.error(error_msg, stack_info=True)
         raise ParserFindTagException(error_msg)
     return searched_tag
 
 
+def fetch_and_parse(session, url, encoding='utf-8'):
+    """
+    Загрузка страницы по URL и создание объекта BeautifulSoup.
+    """
+    try:
+        response = get_response(session, url, encoding=encoding)
+        return BeautifulSoup(response.text, 'lxml')
+    except RuntimeError as e:
+        logging.error(str(e))
+        return None
+
+
 def extract_rows_from_tables(soup):
-    """Извлекает все строки из всех таблиц на странице."""
+    """
+    Извлекает все строки из всех таблиц на странице.
+    """
     tables = soup.find_all('table')
     if not tables:
         logging.error('На странице не найдено таблиц.')
@@ -45,7 +60,7 @@ def extract_rows_from_tables(soup):
             rows = table.find('tbody').find_all('tr')
             logging.info(
                 f'Таблица {table_index}: '
-                f'Найдено строк {len(rows)} (включая заголовок).'
+                f'Найдено строк {len(rows)}.'
             )
             all_rows.extend(rows)
         except Exception as e:
@@ -54,7 +69,9 @@ def extract_rows_from_tables(soup):
 
 
 def parse_row(row, table_index):
-    """Обрабатывает строку таблицы и возвращает статус и ссылку."""
+    """
+    Обрабатывает строку таблицы и возвращает статус и ссылку.
+    """
     try:
         columns = row.find_all('td')
         if len(columns) < 2:
@@ -77,19 +94,20 @@ def parse_row(row, table_index):
     except Exception as e:
         logging.error(
             f'Ошибка извлечения данных из строки таблицы {table_index}: {e}'
-            )
+        )
         return None, None
 
 
 def extract_status_from_pep_page(session, pep_link):
-    """Извлекает статус PEP со страницы PEP."""
-    pep_response = get_response(session, pep_link)
-    if pep_response is None:
-        logging.warning(f'Не удалось получить страницу PEP: {pep_link}')
+    """
+    Извлекает статус PEP со страницы PEP.
+    """
+    pep_soup = fetch_and_parse(session, pep_link)
+    if pep_soup is None:
+        logging.warning(f'Не удалось загрузить страницу PEP: {pep_link}')
         return 'Не найден'
 
     try:
-        pep_soup = BeautifulSoup(pep_response.text, 'lxml')
         status_dd = pep_soup.select_one('dt:contains("Status") + dd')
         return status_dd.text.strip() if status_dd else 'Не найден'
     except Exception as e:
