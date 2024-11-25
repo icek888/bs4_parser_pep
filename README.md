@@ -74,6 +74,9 @@ python main.py latest-versions
 python main.py pep -o pretty
 python main.py pep -o file
 ```
+### Благодарности
+- Благодарности команде Python за разработку и поддержку документации PEP.
+- Благодарности авторам библиотек BeautifulSoup, Requests, tqdm за удобные инструменты для разработки.
 
 ## Разработчик: Карлен Абелян
 
