@@ -10,10 +10,16 @@ from tqdm import tqdm
 from urllib3.util.retry import Retry
 
 from configs import configure_argument_parser, configure_logging
-from constants import BASE_DIR, EXPECTED_STATUS, MAIN_DOC_URL, PEP_INDEX_URL
+from constants import BASE_DIR, MAIN_DOC_URL, PEP_INDEX_URL
 from exceptions import ParserFindTagException
 from outputs import control_output
-from utils import find_tag, get_response
+from utils import (
+    find_tag,
+    get_response, 
+    extract_rows_from_tables,
+    extract_status_from_pep_page,
+    parse_row
+    )
 
 
 def whats_new(session):
@@ -140,86 +146,30 @@ def pep(session):
         return
 
     soup = BeautifulSoup(response.text, 'lxml')
-    try:
-        tables = soup.find_all('table')
-        if not tables:
-            logging.error('На странице не найдено таблиц.')
-            return
-        logging.info(f'Найдено таблиц: {len(tables)}')
-    except Exception as e:
-        logging.error(f'Ошибка поиска таблиц: {e}')
+    rows = extract_rows_from_tables(soup)
+    if not rows:
         return
 
     results = {}
     total_peps = 0
 
-    for table_index, table in enumerate(tables, start=1):
-        try:
-            rows = table.find('tbody').find_all('tr')
-            logging.info(
-                f'Таблица {table_index}: '
-                f'Найдено строк {len(rows)} (включая заголовок).'
-            )
-        except Exception as e:
-            logging.error(f'Ошибка обработки таблицы {table_index}: {e}')
+    for row in tqdm(rows, desc='Обработка строк таблиц'):
+        table_status, pep_link = parse_row(row, table_index=0)
+        if not pep_link:
             continue
 
-        for row in tqdm(rows, desc=f'Обработка таблицы {table_index}'):
-            try:
-                columns = row.find_all('td')
-                if len(columns) < 2:
-                    logging.warning(
-                        'Пропущена строка таблицы с '
-                        'недостаточным числом колонок.'
-                    )
-                    continue
+        page_status = extract_status_from_pep_page(session, pep_link)
 
-                table_status_abbr = columns[0].text.strip()
-                table_status = EXPECTED_STATUS.get(
-                    table_status_abbr[0], ('Неизвестный статус',)
-                )
-                pep_link = urljoin(PEP_INDEX_URL, columns[1].find('a')['href'])
-                logging.debug(
-                    f'Таблица {table_index}: '
-                    f'статус "{table_status_abbr}", ссылка {pep_link}'
-                )
-            except Exception as e:
-                logging.error(
-                    f'Ошибка извлечения данных из строки таблицы '
-                    f'{table_index}: {e}'
-                )
-                continue
+        if page_status not in table_status:
+            logging.warning(
+                f'Несовпадающие статусы:\n'
+                f'{pep_link}\n'
+                f'Статус в карточке: {page_status}\n'
+                f'Ожидаемые статусы: {table_status}'
+            )
 
-            pep_response = get_response(session, pep_link)
-            if pep_response is None:
-                logging.warning(
-                    f'Не удалось получить страницу PEP: {pep_link}'
-                    )
-                continue
-
-            try:
-                pep_soup = BeautifulSoup(pep_response.text, 'lxml')
-                status_dd = pep_soup.select_one('dt:contains("Status") + dd')
-                page_status = (
-                    status_dd.text.strip() if status_dd else 'Не найден'
-                    )
-                logging.debug(f'Статус из карточки PEP: {page_status}')
-            except Exception as e:
-                logging.error(
-                    f'Ошибка извлечения статуса на странице {pep_link}: {e}'
-                )
-                continue
-
-            if page_status not in table_status:
-                logging.warning(
-                    f'Несовпадающие статусы:\n'
-                    f'{pep_link}\n'
-                    f'Статус в карточке: {page_status}\n'
-                    f'Ожидаемые статусы: {table_status}'
-                )
-
-            results[page_status] = results.get(page_status, 0) + 1
-            total_peps += 1
+        results[page_status] = results.get(page_status, 0) + 1
+        total_peps += 1
 
     results['Total'] = total_peps
     logging.info(f'Результаты парсинга PEP: {results}')
