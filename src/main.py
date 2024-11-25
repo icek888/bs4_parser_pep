@@ -15,7 +15,7 @@ from exceptions import ParserFindTagException
 from outputs import control_output
 from utils import (
     find_tag,
-    get_response, 
+    get_response,
     extract_rows_from_tables,
     extract_status_from_pep_page,
     parse_row
