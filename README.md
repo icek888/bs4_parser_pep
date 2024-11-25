@@ -21,12 +21,12 @@
 ## Установка
 
 ### Клонирование репозитория
-```bash
+
 git clone <URL вашего репозитория>
 cd <имя папки проекта>
 
 ### Создание виртуального окружения
-```bash
+
 python -m venv venv
 source venv/bin/activate  # Для Linux и MacOS
 venv\\Scripts\\activate     # Для Windows
@@ -54,7 +54,7 @@ pip install -r requirements.txt
 ### Примеры запуска
 
 #### Парсинг статусов PEP
-```bash
+
 python main.py pep
 # Парсинг нововведений в Python
 python main.py whats-new
