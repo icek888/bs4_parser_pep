@@ -74,7 +74,6 @@ python main.py latest-versions
 python main.py pep -o pretty
 python main.py pep -o file
 ```
-🧑‍💻 Автор
 
 ## Разработчик: Карлен Абелян
 
