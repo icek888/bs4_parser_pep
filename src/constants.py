@@ -21,3 +21,5 @@ LOG_FILE = LOG_DIR / 'parser.log'
 DOWNLOADS_DIR = 'downloads'
 RESULTS_DIR = 'results'
 AVAILABLE_OUTPUT_CHOICES = ('pretty', 'file')
+OUTPUT_PRETTY = 'pretty'
+OUTPUT_FILE = 'file'

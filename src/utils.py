@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from requests import RequestException
 
 from constants import EXPECTED_STATUS, PEP_INDEX_URL
-from exceptions import ParserFindTagException
+from exceptions import ParserFindTagException, FetchError
 
 
 def get_response(session, url, encoding='utf-8'):
@@ -17,7 +17,7 @@ def get_response(session, url, encoding='utf-8'):
         response.encoding = encoding
         return response
     except RequestException as e:
-        raise RuntimeError(f'Ошибка при загрузке страницы {url}: {e}') from e
+        raise FetchError(f'Ошибка при загрузке страницы {url}: {e}') from e
 
 
 def find_tag(soup, tag, attrs=None, string=None):
@@ -32,16 +32,13 @@ def find_tag(soup, tag, attrs=None, string=None):
     return searched_tag
 
 
-def fetch_and_parse(session, url, encoding='utf-8'):
+def fetch_and_parse(session, url, encoding='utf-8', parser='lxml'):
     """
     Загрузка страницы по URL и создание объекта BeautifulSoup.
+    Позволяет задать кодировку и тип парсера.
     """
-    try:
-        response = get_response(session, url, encoding=encoding)
-        return BeautifulSoup(response.text, 'lxml')
-    except RuntimeError as e:
-        logging.error(str(e))
-        return None
+    response = get_response(session, url, encoding=encoding)
+    return BeautifulSoup(response.text, parser)
 
 
 def extract_rows_from_tables(soup):
@@ -50,8 +47,7 @@ def extract_rows_from_tables(soup):
     """
     tables = soup.find_all('table')
     if not tables:
-        logging.error('На странице не найдено таблиц.')
-        return []
+        raise ParserFindTagException('На странице не найдено таблиц.')
 
     logging.info(f'Найдено таблиц: {len(tables)}')
     all_rows = []
@@ -64,7 +60,9 @@ def extract_rows_from_tables(soup):
             )
             all_rows.extend(rows)
         except Exception as e:
-            logging.error(f'Ошибка обработки таблицы {table_index}: {e}')
+            raise ParserFindTagException(
+                f'Ошибка обработки таблицы {table_index}: {e}'
+            ) from e
     return all_rows
 
 
@@ -72,30 +70,23 @@ def parse_row(row, table_index):
     """
     Обрабатывает строку таблицы и возвращает статус и ссылку.
     """
-    try:
-        columns = row.find_all('td')
-        if len(columns) < 2:
-            logging.warning(
-                f'Пропущена строка таблицы {table_index} '
-                f'с недостаточным числом колонок.'
-            )
-            return None, None
+    columns = row.find_all('td')
+    if len(columns) < 2:
+        raise ParserFindTagException(
+            f'Пропущена строка таблицы {table_index} '
+            'с недостаточным числом колонок.'
+        )
 
-        table_status_abbr = columns[0].text.strip()
-        table_status = EXPECTED_STATUS.get(
-            table_status_abbr[0], ('Неизвестный статус',)
-        )
-        pep_link = urljoin(PEP_INDEX_URL, columns[1].find('a')['href'])
-        logging.debug(
-            f'Таблица {table_index}: статус "{table_status_abbr}", '
-            f'ссылка {pep_link}'
-        )
-        return table_status, pep_link
-    except Exception as e:
-        logging.error(
-            f'Ошибка извлечения данных из строки таблицы {table_index}: {e}'
-        )
-        return None, None
+    table_status_abbr = columns[0].text.strip()
+    table_status = EXPECTED_STATUS.get(
+        table_status_abbr[0], ('Неизвестный статус',)
+    )
+    pep_link = urljoin(PEP_INDEX_URL, columns[1].find('a')['href'])
+    logging.debug(
+        f'Таблица {table_index}: статус "{table_status_abbr}", '
+        f'ссылка {pep_link}'
+    )
+    return table_status, pep_link
 
 
 def extract_status_from_pep_page(session, pep_link):
@@ -103,13 +94,9 @@ def extract_status_from_pep_page(session, pep_link):
     Извлекает статус PEP со страницы PEP.
     """
     pep_soup = fetch_and_parse(session, pep_link)
-    if pep_soup is None:
-        logging.warning(f'Не удалось загрузить страницу PEP: {pep_link}')
-        return 'Не найден'
-
-    try:
-        status_dd = pep_soup.select_one('dt:contains("Status") + dd')
-        return status_dd.text.strip() if status_dd else 'Не найден'
-    except Exception as e:
-        logging.error(f'Ошибка извлечения статуса на странице {pep_link}: {e}')
-        return 'Не найден'
+    status_dd = pep_soup.select_one('dt:contains("Status") + dd')
+    if not status_dd:
+        raise ParserFindTagException(
+            f'Статус на странице {pep_link} не найден.'
+        )
+    return status_dd.text.strip()

@@ -4,28 +4,27 @@ from datetime import datetime
 
 from prettytable import PrettyTable
 
-from constants import RESULTS_DIR, BASE_DIR
+from constants import BASE_DIR, OUTPUT_FILE, OUTPUT_PRETTY, RESULTS_DIR
 
 
 def control_output(results, cli_args):
     """Обработка результатов согласно выбранному способу вывода."""
     output_options = {
-        'pretty': pretty_output,
-        'file': file_output,
-        None: default_output
+        OUTPUT_PRETTY: pretty_output,
+        OUTPUT_FILE: file_output,
     }
 
     output_function = output_options.get(cli_args.output, default_output)
     output_function(results, cli_args)
 
 
-def default_output(results, *_):
+def default_output(results, *args):
     """Вывод результатов в консоль по умолчанию."""
     for row in results:
         print(' '.join(map(str, row)))
 
 
-def pretty_output(results, *_):
+def pretty_output(results, *args):
     """Вывод результатов в виде таблицы."""
     table = PrettyTable()
     table.field_names = results[0]
@@ -39,7 +38,7 @@ def file_output(results, cli_args):
     results_dir.mkdir(exist_ok=True)
     file_name = (
         f"{cli_args.mode}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
-        )
+    )
     file_path = results_dir / file_name
 
     with open(file_path, mode='w', encoding='utf-8') as csvfile:
