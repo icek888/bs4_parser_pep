@@ -9,7 +9,7 @@ from tqdm import tqdm
 from urllib3.util.retry import Retry
 
 from configs import configure_argument_parser, configure_logging
-from constants import MAIN_DOC_URL, PEP_INDEX_URL, DOWNLOADS_DIR, BASE_DIR
+from constants import BASE_DIR, DOWNLOADS_DIR, MAIN_DOC_URL, PEP_INDEX_URL
 from exceptions import ParserFindTagException
 from outputs import control_output
 from utils import (

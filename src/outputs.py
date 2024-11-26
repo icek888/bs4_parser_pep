@@ -12,9 +12,10 @@ def control_output(results, cli_args):
     output_options = {
         OUTPUT_PRETTY: pretty_output,
         OUTPUT_FILE: file_output,
+        None: default_output
     }
 
-    output_function = output_options.get(cli_args.output, default_output)
+    output_function = output_options.get(cli_args.output)
     output_function(results, cli_args)
 
 
